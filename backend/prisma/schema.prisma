@@ -113,6 +113,7 @@ model Company {
   branches       String[]
   requiredSkills String[]
   industry       String?
+  tier           String?          @default("Service")
   description    String?
   logoUrl        String?
   website        String?

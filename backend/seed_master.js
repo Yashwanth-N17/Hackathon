@@ -2,9 +2,9 @@ import { prisma } from "./src/config/db.js";
 import { hashPassword } from "./src/utils/hash.js";
 
 async function main() {
-  console.log("🚀 Starting Clean Master Data Seed (Indian Ecosystem - 6 Months History)...");
+  console.log("🚀 Starting Master Data Seed (Full 6-Month Timeline)...");
 
-  // 0. CLEAR EXISTING DATA (Ordered for constraints)
+  // 0. CLEAR EXISTING DATA
   console.log("🧹 Clearing old data...");
   try {
     await prisma.interviewMessage.deleteMany({});
@@ -41,15 +41,16 @@ async function main() {
       collegeName,
     }
   });
-  console.log("✅ Placement Officer created.");
 
-  // 2. Indian Companies
+  // 2. Companies
   const companies = [
-    { name: "TATA Consultancy Services (TCS)", website: "tcs.com", industry: "IT Services", ctc: "12 LPA", minCgpa: 7.5, minReadiness: 65.0 },
-    { name: "Infosys Limited", website: "infosys.com", industry: "IT Consulting", ctc: "10 LPA", minCgpa: 7.0, minReadiness: 60.0 },
-    { name: "Reliance Industries", website: "ril.com", industry: "Conglomerate", ctc: "18 LPA", minCgpa: 8.0, minReadiness: 75.0 },
-    { name: "Wipro Technologies", website: "wipro.com", industry: "IT Services", ctc: "9.5 LPA", minCgpa: 7.0, minReadiness: 60.0 },
-    { name: "Zomato", website: "zomato.com", industry: "Product / FoodTech", ctc: "24 LPA", minCgpa: 8.5, minReadiness: 80.0 }
+    { name: "TATA Consultancy Services (TCS)", website: "tcs.com", industry: "IT Services", ctc: "12 LPA", minCgpa: 7.5, minReadiness: 65.0, tier: "Service" },
+    { name: "Infosys Limited", website: "infosys.com", industry: "IT Consulting", ctc: "10 LPA", minCgpa: 7.0, minReadiness: 60.0, tier: "Service" },
+    { name: "Reliance Industries", website: "ril.com", industry: "Conglomerate", ctc: "18 LPA", minCgpa: 8.0, minReadiness: 75.0, tier: "Premium" },
+    { name: "Wipro Technologies", website: "wipro.com", industry: "IT Services", ctc: "9.5 LPA", minCgpa: 7.0, minReadiness: 60.0, tier: "Service" },
+    { name: "Zomato", website: "zomato.com", industry: "Product / FoodTech", ctc: "24 LPA", minCgpa: 8.5, minReadiness: 80.0, tier: "Product" },
+    { name: "Google India", website: "google.com", industry: "Product", ctc: "32 LPA", minCgpa: 8.5, minReadiness: 85.0, tier: "Product" },
+    { name: "Microsoft", website: "microsoft.com", industry: "Product", ctc: "28 LPA", minCgpa: 8.0, minReadiness: 80.0, tier: "Product" }
   ];
 
   const companyMap = {};
@@ -57,13 +58,11 @@ async function main() {
     const created = await prisma.company.create({ data: c });
     companyMap[c.name] = created.id;
   }
-  console.log("✅ Indian Companies seeded.");
 
-  // 3. Indian Recruiter Users
+  // 3. Recruiters
   const recruiters = [
     { email: "recruiter@tcs.com", fullName: "N. Chandrasekaran", companyId: companyMap["TATA Consultancy Services (TCS)"] },
     { email: "hr@infosys.com", fullName: "Salil Parekh", companyId: companyMap["Infosys Limited"] },
-    { email: "hiring@ril.com", fullName: "Mukesh Ambani", companyId: companyMap["Reliance Industries"] },
     { email: "talent@zomato.com", fullName: "Deepinder Goyal", companyId: companyMap["Zomato"] }
   ];
 
@@ -79,23 +78,23 @@ async function main() {
       }
     });
   }
-  console.log("✅ Indian Recruiter accounts seeded.");
 
-  // 4. Indian Students
-  const branches = ["CSE", "ECE", "ISE", "Mechanical"];
+  // 4. Students
+  const branches = ["CSE-A", "CSE-B", "ECE", "ISE"];
   const studentNames = [
     "Rahul Deshmukh", "Priya Iyer", "Ananya Singh", "Arjun Reddy", 
     "Siddharth Rao", "Ishani Gupta", "Vikram Malhotra", "Meera Nair", 
     "Karthik Swamy", "Sneha Kulkarni", "Aditya Chatterjee", "Zoya Khan",
     "Rohan Gupta", "Tanya Sen", "Varun Mehta", "Deepak Kumar", 
-    "Sushmita Roy", "Abhishek Jain", "Pooja Hegde", "Manoj Tiwari"
+    "Sushmita Roy", "Abhishek Jain", "Pooja Hegde", "Manoj Tiwari",
+    "Kiran Rao", "Nidhi Agarwal", "Sandeep Varma", "Kavya Madhavan"
   ];
 
   const students = [];
   for (let i = 0; i < studentNames.length; i++) {
     const name = studentNames[i];
     const email = `${name.toLowerCase().replace(" ", ".")}@gmail.com`;
-    const usn = `1RV21${branches[i % 4].slice(0, 2)}${String(100 + i).padStart(3, "0")}`;
+    const usn = `1RV21${branches[i % 4].slice(0, 3).replace("-","")}${String(100 + i).padStart(3, "0")}`;
 
     const user = await prisma.user.create({
       data: {
@@ -115,143 +114,114 @@ async function main() {
         id: usn,
         branch: branches[i % 4],
         cgpa: parseFloat((7.0 + Math.random() * 2.5).toFixed(2)),
-        readinessScore: 0, // Will update after attempts
-        semester: 7,
-        placementStatus: "APPLIED",
-        aiFeedback: "Student profile initialized. Awaiting diagnostic assessment results."
+        readinessScore: 0, 
+        placementStatus: i < 6 ? "PLACED" : "UNPLACED",
+        aptitudeScore: 0,
+        coreScore: 0,
+        softSkillsScore: 0
       }
     });
     students.push(user);
   }
-  console.log(`✅ ${students.length} Indian Student profiles seeded.`);
 
-  // 5. Assessments & Historical Attempts (6 Months)
-  console.log("📊 Generating 6-month historical performance data...");
+  // 5. Historical Assessment Attempts (6 Months)
+  console.log("📊 Seeding 6 months of assessment trends...");
   const assessmentTypes = ["APTITUDE", "CORE", "SOFT_SKILLS"];
-  const assessments = [];
-
+  const now = new Date();
+  
   for (const type of assessmentTypes) {
     const assessment = await prisma.assessment.create({
       data: {
-        title: `${type.charAt(0) + type.slice(1).toLowerCase()} Diagnostic Test`,
+        title: `${type} Mastery Test`,
         type: type,
         subject: type === "CORE" ? "Computer Science" : "General",
-        scheduledAt: new Date(),
+        scheduledAt: now,
         duration: 60,
         createdById: po.id
       }
     });
-    assessments.push(assessment);
-  }
 
-  const now = new Date();
-  for (const student of students) {
-    let avgAptitude = 0, avgCore = 0, avgSoft = 0;
-    
-    // Create ~15 attempts per student over 6 months
-    for (let m = 0; m < 6; m++) {
-      for (const assessment of assessments) {
+    for (const student of students) {
+      let finalScore = 0;
+      for (let m = 0; m < 6; m++) {
         const attemptDate = new Date(now);
         attemptDate.setMonth(now.getMonth() - (5 - m));
-        attemptDate.setDate(Math.floor(Math.random() * 28) + 1);
-
-        const baseScore = 50 + (m * 5); // Improving trend
-        const score = Math.min(100, baseScore + (Math.random() * 20));
+        const score = Math.min(100, 45 + (m * 7) + (Math.random() * 15));
         
         await prisma.assessmentAttempt.create({
           data: {
             userId: student.id,
             assessmentId: assessment.id,
             score: score,
-            correctCount: Math.floor((score / 100) * 50),
+            correctCount: Math.floor(score/2),
             totalCount: 50,
-            timeTaken: 1800 + Math.floor(Math.random() * 1200),
+            timeTaken: 1800,
             createdAt: attemptDate,
             answers: { mock: true }
           }
         });
-
-        if (assessment.type === "APTITUDE") avgAptitude = score;
-        if (assessment.type === "CORE") avgCore = score;
-        if (assessment.type === "SOFT_SKILLS") avgSoft = score;
+        finalScore = score;
       }
+      
+      const updateData = {};
+      if (type === "APTITUDE") updateData.aptitudeScore = finalScore;
+      if (type === "CORE") updateData.coreScore = finalScore;
+      if (type === "SOFT_SKILLS") updateData.softSkillsScore = finalScore;
+      
+      await prisma.studentProfile.update({
+        where: { userId: student.id },
+        data: updateData
+      });
     }
+  }
 
-    // Update profile with latest averages/scores
+  // Update final readiness
+  for (const student of students) {
+    const profile = await prisma.studentProfile.findUnique({ where: { userId: student.id } });
+    const readiness = (profile.aptitudeScore + profile.coreScore + profile.softSkillsScore) / 3;
     await prisma.studentProfile.update({
       where: { userId: student.id },
-      data: {
-        aptitudeScore: parseFloat(avgAptitude.toFixed(2)),
-        coreScore: parseFloat(avgCore.toFixed(2)),
-        softSkillsScore: parseFloat(avgSoft.toFixed(2)),
-        codingScore: parseFloat((avgCore * 0.9).toFixed(2)),
-        readinessScore: parseFloat(((avgAptitude + avgCore + avgSoft) / 3).toFixed(2)),
-        aiFeedback: `Showing steady improvement over 6 months. Strong in ${avgAptitude > 80 ? 'Quantitative Aptitude' : 'Logical Reasoning'}. Recommended to focus on advanced ${avgCore < 70 ? 'System Design' : 'Algorithm Optimization'}.`
-      }
+      data: { readinessScore: Math.round(readiness) }
     });
   }
-  console.log("✅ 6-month historical attempts and profiles updated.");
 
-  // 6. Recruitment Drives
-  const driveData = [
-    { title: "TATA Digital Campus 2025", role: "Graduate Engineer Trainee", companyId: companyMap["TATA Consultancy Services (TCS)"], salary: "12 LPA", status: "ACTIVE", location: "Block A Seminar Hall" },
-    { title: "Reliance JIO Hiring", role: "Software Developer", companyId: companyMap["Reliance Industries"], salary: "18 LPA", status: "UPCOMING", location: "Auditorium" },
-    { title: "Infosys HackWithInfy", role: "Systems Engineer", companyId: companyMap["Infosys Limited"], salary: "10 LPA", status: "COMPLETED", location: "Online" },
-    { title: "Zomato Ninja Program", role: "Backend Developer", companyId: companyMap["Zomato"], salary: "24 LPA", status: "ACTIVE", location: "Placement Cell" }
+  // 6. Recruitment History (6 Months)
+  console.log("🏢 Seeding 6 months of recruitment history...");
+  const driveNames = [
+    { title: "TCS Ninja 2025", company: "TATA Consultancy Services (TCS)", month: 5 },
+    { title: "Infosys Certification", company: "Infosys Limited", month: 4 },
+    { title: "Zomato Ninja", company: "Zomato", month: 3 },
+    { title: "Reliance JIO", company: "Reliance Industries", month: 2 },
+    { title: "Microsoft Intern", company: "Microsoft", month: 1 },
+    { title: "Google STEP", company: "Google India", month: 0 }
   ];
 
-  for (const d of driveData) {
+  for (const d of driveNames) {
+    const driveDate = new Date(now);
+    driveDate.setMonth(now.getMonth() - d.month);
+    
     await prisma.placementDrive.create({
       data: {
-        ...d,
-        date: new Date(Date.now() + (Math.random() > 0.5 ? 10 : -10) * 24 * 60 * 60 * 1000),
-        description: `Campus recruitment for ${d.role} at ${d.title}. Candidates must have strong problem-solving skills.`,
+        title: d.title,
+        role: "Software Engineer",
+        salary: "15 LPA",
+        status: d.month === 0 ? "ACTIVE" : "COMPLETED",
+        companyId: companyMap[d.company],
+        createdAt: driveDate,
+        date: driveDate,
         students: {
-          connect: students.filter((_, idx) => idx % 3 === 0).map(s => ({ id: s.id }))
+          connect: students.filter((_, idx) => (idx + d.month) % 4 === 0).map(s => ({ id: s.id }))
         }
       }
     });
   }
-  console.log("✅ Recruitment drives seeded.");
 
-  // 7. Inbound Requests
-  await prisma.inboundRequest.createMany({
-    data: [
-      {
-        companyId: companyMap["Wipro Technologies"],
-        title: "Wipro Elite National Talent Hunt",
-        description: "Hiring for Project Engineer role across India.",
-        ctc: "9.5",
-        minCgpa: 6.5,
-        minReadiness: 60.0,
-        requiredSkills: ["Java", "Python", "SQL"],
-        targetCollege: collegeName,
-        status: "PENDING"
-      },
-      {
-        companyId: companyMap["Infosys Limited"],
-        title: "Specialist Programmer Role",
-        description: "High-tier coding role for competitive programmers.",
-        ctc: "16",
-        minCgpa: 8.0,
-        minReadiness: 80.0,
-        requiredSkills: ["Algorithms", "DS", "C++"],
-        targetCollege: collegeName,
-        status: "APPROVED"
-      }
-    ]
-  });
-  console.log("✅ Indian Partnership requests seeded.");
-
-  console.log("\n✨ 6-Month Indian Ecosystem successfully seeded!");
-  console.log("   - Credentials unchanged. Use po@iipe.edu.in, recruiter@tcs.com, or rahul.deshmukh@gmail.com");
+  console.log("\n✨ Master Data Seeding Complete!");
+  console.log("   Timeline: 6 Months");
+  console.log("   Drives: 6");
+  console.log("   Student Attempts: 18 per student");
 }
 
 main()
-  .catch((e) => {
-    console.error(e);
-    process.exit(1);
-  })
-  .finally(async () => {
-    await prisma.$disconnect();
-  });
+  .catch((e) => { console.error(e); process.exit(1); })
+  .finally(async () => { await prisma.$disconnect(); });

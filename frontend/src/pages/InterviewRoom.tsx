@@ -12,8 +12,8 @@ import axios from 'axios';
 import { useToast } from '@/hooks/use-toast';
 import * as faceapi from '@vladmandic/face-api';
 
-const API_BASE = "http://localhost:3000/api";
-const SOCKET_URL = "http://localhost:3000";
+const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:3000/api";
+const SOCKET_URL = import.meta.env.VITE_SOCKET_URL || "http://localhost:3000";
 
 const InterviewRoom = () => {
   const { id } = useParams();
