@@ -1,340 +1,164 @@
 import { prisma } from "../src/config/db.js";
-import bcrypt from "bcryptjs";
+import { hashPassword } from "../src/utils/hash.js";
 
 async function main() {
-  console.log("🌱 Starting Deep Database Reset & Comprehensive Seeding...");
+  console.log("🚀 INITIALIZING MASTER SEED V2 (Branch-Aware & Dashboard-Rich)...");
 
-  // 1. Clean Database in Reverse Topological Order
-  console.log("🧹 Clearing existing data...");
-  await prisma.notification.deleteMany();
-  await prisma.trainingTestResult.deleteMany();
-  await prisma.trainingModuleProgress.deleteMany();
-  await prisma.assessmentAttempt.deleteMany();
-  await prisma.assessment.deleteMany();
-  await prisma.question.deleteMany();
-  await prisma.tag.deleteMany();
-  await prisma.interviewMessage.deleteMany();
-  await prisma.mockInterview.deleteMany();
-  
-  const placementDrives = await prisma.placementDrive.findMany();
-  for (const p of placementDrives) {
-    await prisma.placementDrive.update({
-      where: { id: p.id },
-      data: { students: { set: [] } } 
-    });
-  }
-  await prisma.placementDrive.deleteMany();
-  await prisma.company.deleteMany();
-  
-  await prisma.studentProfile.deleteMany();
-  const users = await prisma.user.findMany();
-  for (const u of users) {
-    try {
-      await prisma.user.update({
-        where: { id: u.id },
-        data: { mentees: { set: [] }, mentor: { disconnect: true } }
-      });
-    } catch(e) {}
-  }
-  await prisma.user.deleteMany();
+  // 1. CLEAN DATABASE
+  console.log("🧹 Clearing old data...");
+  try {
+    await prisma.interviewMessage.deleteMany({});
+    await prisma.notification.deleteMany({});
+    await prisma.assessmentAttempt.deleteMany({});
+    await prisma.mockInterview.deleteMany({});
+    await prisma.inboundRequest.deleteMany({});
+    await prisma.placementDrive.deleteMany({});
+    await prisma.trainingTestResult.deleteMany({});
+    await prisma.trainingModuleProgress.deleteMany({});
+    await prisma.assessment.deleteMany({});
+    await prisma.question.deleteMany({});
+    await prisma.tag.deleteMany({});
+    await prisma.studentProfile.deleteMany({});
+    await prisma.user.deleteMany({ where: { role: { in: ["STUDENT", "COMPANY", "PLACEMENT", "FACULTY"] } } });
+    await prisma.company.deleteMany({});
+  } catch (err) { console.log("⚠️ Cleanup warning:", err.message); }
 
-  // 2. Base Metadata
-  const defaultPassword = await bcrypt.hash("password123", 10);
-  
-  console.log("👨‍🏫 Creating Faculty and Placement users...");
-  const faculty = await prisma.user.create({
+  const password = await hashPassword("password123");
+  const collegeName = "IIPE - College of Engineering";
+
+  // 2. STAKEHOLDERS
+  const po = await prisma.user.create({
+    data: { email: "po@iipe.edu.in", password, role: "PLACEMENT", fullName: "Dr. Rajesh K. Varma", collegeName }
+  });
+
+  const facultyCSE = await prisma.user.create({
+    data: { email: "cse.faculty@iipe.edu.in", password, role: "FACULTY", fullName: "Prof. Amit Rao (CSE)", collegeName }
+  });
+
+  // 3. COMPANIES & LIVE JOBS
+  const google = await prisma.company.create({ data: { name: "Google India", industry: "Product", website: "google.co.in", ctc: "45 LPA", tier: "Premium" } });
+  const tcs = await prisma.company.create({ data: { name: "TCS", industry: "IT Services", website: "tcs.com", ctc: "12 LPA", tier: "Service" } });
+  const bosch = await prisma.company.create({ data: { name: "Bosch", industry: "Hardware/Core", website: "bosch.in", ctc: "18 LPA", tier: "Premium" } });
+
+  // Company HR Users
+  await prisma.user.create({ data: { email: "hr@google.com", password, role: "COMPANY", fullName: "Google HR", companyId: google.id } });
+  await prisma.user.create({ data: { email: "hr@bosch.com", password, role: "COMPANY", fullName: "Bosch HR", companyId: bosch.id } });
+
+  // Default Assessment for history
+  const defaultAssessment = await prisma.assessment.create({
     data: {
-      email: "faculty@placeready.com",
-      password: defaultPassword,
-      role: "FACULTY",
-      fullName: "Dr. Alan Turing",
-      name: "Alan",
-      department: "Computer Science",
+      title: "Quarterly Proficiency Exam",
+      type: "APTITUDE",
+      subject: "General Readiness",
+      scheduledAt: new Date(),
+      duration: 60,
+      createdById: po.id
     }
   });
 
-  const placement = await prisma.user.create({
-    data: {
-      email: "placement@placeready.com",
-      password: defaultPassword,
-      role: "PLACEMENT",
-      fullName: "Sheryl Sandberg",
-      name: "Sheryl",
-      department: "Placement Cell",
-    }
-  });
+  // 4. BRANCH-BASED STUDENTS (15 Students with Real Names)
+  const studentNames = {
+    "Computer Science": ["Rahul Deshmukh", "Priya Sharma", "Amit Patel", "Sneha Kulkarni", "Arjun Reddy"],
+    "Electronics": ["Karthik Swamy", "Ishani Gupta", "Vikram Singh", "Meera Nair", "Siddharth Rao"],
+    "Mechanical": ["Sanjay Verma", "Ananya Iyer", "Rohan Mehta", "Kavita Joshi", "Deepak Pandey"]
+  };
 
-  console.log("🏷️ Creating Tags and Questions...");
-  const tagsData = ["Algorithms", "Data Structures", "Aptitude", "System Design", "Core CS", "Soft Skills"];
-  const createdTags = [];
-  for (const t of tagsData) {
-    createdTags.push(await prisma.tag.create({ data: { name: t } }));
-  }
-
-  const q1 = await prisma.question.create({
-    data: {
-      text: "What is the time complexity of QuickSort in the worst case?",
-      answer: "O(n^2)",
-      options: ["O(n log n)", "O(n)", "O(n^2)", "O(1)"],
-      type: "MCQ",
-      subject: "Data Structures",
-      topic: "Sorting",
-      difficulty: "MEDIUM",
-      isVisible: true,
-      uploadedById: faculty.id,
-      tags: { connect: [{ id: createdTags[0].id }] }
-    }
-  });
-
-  const q2 = await prisma.question.create({
-    data: {
-      text: "If 5 machines make 5 widgets in 5 minutes, how long does it take 100 machines to make 100 widgets?",
-      answer: "5 minutes",
-      options: ["100 minutes", "5 minutes", "20 minutes", "10 minutes"],
-      type: "MCQ",
-      subject: "Aptitude",
-      topic: "Time & Work",
-      difficulty: "HARD",
-      isVisible: true,
-      uploadedById: faculty.id,
-      tags: { connect: [{ id: createdTags[2].id }] }
-    }
-  });
-
-  const q3 = await prisma.question.create({
-    data: {
-      text: "Explain the CAP theorem in distributed systems.",
-      answer: "Consistency, Availability, Partition Tolerance",
-      type: "DESCRIPTIVE",
-      subject: "System Design",
-      topic: "Arch",
-      difficulty: "HARD",
-      isVisible: true,
-      uploadedById: faculty.id,
-      tags: { connect: [{ id: createdTags[3].id }] }
-    }
-  });
-
-  console.log("🎓 Creating Students with Profiles...");
-  const studentData = [
-    { name: "Alice Johnson", usn: "1CR20CS001", cgpa: 9.2, readiness: 88, status: "OFFERED", email: "alice@placeready.com" },
-    { name: "Bob Smith", usn: "1CR20CS002", cgpa: 7.5, readiness: 62, status: "SHORTLISTED", email: "bob@placeready.com" },
-    { name: "Charlie Davis", usn: "1CR20CS003", cgpa: 8.1, readiness: 75, status: "APPLIED", email: "charlie@placeready.com" },
-    { name: "David Miller", usn: "1CR20CS004", cgpa: 6.8, readiness: 55, status: "UNPLACED", email: "david@placeready.com" },
-    { name: "Eve Wilson", usn: "1CR20CS005", cgpa: 8.9, readiness: 92, status: "PLACED", email: "eve@placeready.com" },
+  const branches = [
+    { name: "Computer Science", code: "CS", coreLabel: "Coding" },
+    { name: "Electronics", code: "EC", coreLabel: "VLSI/Embedded" },
+    { name: "Mechanical", code: "ME", coreLabel: "CAD/Thermal" }
   ];
 
-  const students = [];
-  for (const s of studentData) {
-    const user = await prisma.user.create({
-      data: {
-        email: s.email,
-        password: defaultPassword,
-        role: "STUDENT",
-        fullName: s.name,
-        name: s.name.split(" ")[0],
-        usn: s.usn,
-        department: "Computer Science",
-        mentorId: faculty.id,
-      }
-    });
-
-    await prisma.studentProfile.create({
-      data: {
-        id: crypto.randomUUID(),
-        userId: user.id,
-        cgpa: s.cgpa,
-        readinessScore: s.readiness,
-        aptitudeScore: s.readiness * 0.9,
-        codingScore: s.readiness * 1.1,
-        coreScore: s.readiness,
-        softSkillsScore: s.readiness * 0.95,
-        semester: 7,
-        branch: "Computer Science",
-        placementStatus: s.status,
-      }
-    });
-    students.push(user);
-  }
-
-  // --- Historic Drills (Last 6 Months) ---
-  console.log("📈 Generating 6 Months of Historic Analytics...");
-  const now = new Date();
-  
-  for (let i = 6; i >= 1; i--) {
-    const pastDate = new Date(now.getTime() - i * 30 * 24 * 60 * 60 * 1000);
+  for (const branch of branches) {
+    console.log(`🎓 Seeding ${branch.name} students with real names...`);
+    const names = studentNames[branch.name];
     
-    // Create an apti test explicitly for month trend visualization
-    const assessment = await prisma.assessment.create({
-      data: {
-        title: `Monthly Readiness Drill - Month ${7-i}`,
-        description: `Month ${7-i} tracking assessment.`,
-        type: "MOCK",
-        scheduledAt: pastDate,
-        duration: 60,
-        createdAt: pastDate,
-        updatedAt: pastDate,
-        createdById: faculty.id,
-        resultsReleased: true,
-        students: { connect: students.map(s => ({ id: s.id })) },
-        questions: { connect: [{ id: q1.id }, { id: q2.id }] }
-      }
-    });
-
-    for (let j = 0; j < students.length; j++) {
-      const studentInfo = studentData[j];
-      const startReadiness = studentInfo.readiness - 30; 
-      const incrementPerMonth = 30 / 6;
-      let monthScore = startReadiness + (7-i) * incrementPerMonth;
-      monthScore = monthScore + (Math.random() * 8 - 4);
-      monthScore = Math.max(0, Math.min(100, monthScore));
-
-      const isHighFocusLoss = Math.random() > 0.8;
+    for (let i = 0; i < names.length; i++) {
+      const fullName = names[i];
+      const firstName = fullName.split(' ')[0];
+      const lastName = fullName.split(' ')[1];
+      const email = `${firstName.toLowerCase()}.${lastName.toLowerCase()}@student.com`;
       
-      await prisma.assessmentAttempt.create({
+      const user = await prisma.user.create({
+        data: { 
+          email, 
+          password, 
+          role: "STUDENT", 
+          fullName, 
+          name: firstName, 
+          usn: `1II21${branch.code}0${String(i + 1).padStart(2, '0')}`, 
+          department: branch.name, 
+          collegeName 
+        }
+      });
+
+      // Tailor skills based on branch
+      const aptitude = 70 + Math.random() * 20;
+      const core = 75 + Math.random() * 20;
+      const soft = 80 + Math.random() * 10;
+
+      await prisma.studentProfile.create({
         data: {
-          score: monthScore,
-          correctCount: Math.round((monthScore / 100) * 10),
-          totalCount: 10,
-          timeTaken: 1200 + Math.floor(Math.random() * 600),
-          focusLossCount: isHighFocusLoss ? Math.floor(Math.random() * 10) + 5 : Math.floor(Math.random() * 3),
-          answers: { [q1.id]: 1, [q2.id]: 3 },
-          userId: students[j].id,
-          assessmentId: assessment.id,
-          createdAt: new Date(pastDate.getTime() + 24 * 60 * 60 * 1000) 
+          userId: user.id,
+          readinessScore: (aptitude + core + soft) / 3,
+          cgpa: 7.5 + Math.random() * 2,
+          branch: branch.name,
+          aptitudeScore: aptitude,
+          codingScore: branch.code === "CS" ? core : 40 + Math.random() * 20,
+          coreScore: core,
+          softSkillsScore: soft,
+          placementStatus: i === 1 ? "PLACED" : "UNPLACED"
+        }
+      });
+
+      // 6-Month Historical Graph Points (12 attempts)
+      for (let j = 0; j < 12; j++) {
+        await prisma.assessmentAttempt.create({
+          data: {
+            userId: user.id,
+            assessmentId: defaultAssessment.id,
+            score: 45 + (j * 4) + Math.random() * 5,
+            correctCount: 10 + j,
+            totalCount: 25,
+            timeTaken: 1200,
+            answers: {},
+            createdAt: new Date(Date.now() - (12 - j) * 15 * 24 * 60 * 60 * 1000)
+          }
+        });
+      }
+
+      // Add a completed AI Interview for each
+      await prisma.mockInterview.create({
+        data: {
+          title: `${branch.coreLabel} Mock Interview`,
+          type: "AI",
+          mode: branch.code === "CS" ? "TECHNICAL" : "TECHNICAL",
+          status: "COMPLETED",
+          studentId: user.id,
+          overallScore: 82,
+          feedback: `Great understanding of ${branch.coreLabel} fundamentals.`,
+          analysis: { technical: 85, communication: 80, confidence: 90, problemSolving: 80 },
+          messages: { create: [{ senderRole: "AI", senderName: "AI", text: `Describe your experience with ${branch.coreLabel}.` }] }
         }
       });
     }
   }
 
-  // --- RECENT UNRELEASED ASSESSMENT (For Faculty Manual Review / Grading Dashboard) ---
-  console.log("📝 Creating Unreleased Mock for Faculty Review...");
-  const recentPastDate = new Date(now.getTime() - 2 * 24 * 60 * 60 * 1000); // 2 days ago
-  const unreleasedMock = await prisma.assessment.create({
+  // 5. PLACEMENT DRIVES (Connecting some students)
+  const activeDrive = await prisma.placementDrive.create({
     data: {
-      title: "Core CS Mid-Term Evaluation",
-      description: "Subjective test requiring manual evaluation of descriptive answers.",
-      type: "SUBJECT",
-      scheduledAt: recentPastDate,
-      duration: 90,
-      resultsReleased: false, // CRITICAL for Faculty Manual Review dashboard
-      createdById: faculty.id,
-      students: { connect: students.map(s => ({ id: s.id })) },
-      questions: { connect: [{ id: q3.id }] }
-    }
-  });
-
-  // They all attempted it
-  for (let j = 0; j < students.length; j++) {
-    await prisma.assessmentAttempt.create({
-      data: {
-        score: 0, // Not graded yet
-        correctCount: 0,
-        totalCount: 1,
-        timeTaken: 2400,
-        focusLossCount: Math.floor(Math.random() * 5),
-        answers: { [q3.id]: "The CAP theorem states that a distributed data store..." },
-        userId: students[j].id,
-        assessmentId: unreleasedMock.id,
-        createdAt: new Date(recentPastDate.getTime() + 3600 * 1000) 
-      }
-    });
-  }
-
-  // --- UPCOMING ASSESSMENT ---
-  const upcomingDate = new Date(now.getTime() + 3 * 24 * 60 * 60 * 1000); // 3 days from now
-  await prisma.assessment.create({
-    data: {
-      title: `Final Placements Qualifier - Coding Round`,
-      description: `Mandatory test for Tier-1 product companies.`,
-      type: "CODING",
-      scheduledAt: upcomingDate,
-      duration: 120,
-      resultsReleased: false,
-      createdById: faculty.id,
-      students: { connect: students.map(s => ({ id: s.id })) },
-      questions: { connect: [{ id: q1.id }] }
-    }
-  });
-
-  // --- Create Companies and Drives ---
-  console.log("🏢 Creating Companies & Placement Drives...");
-  const google = await prisma.company.create({
-    data: { name: "Google India", industry: "Product", ctc: "32 LPA", minCgpa: 8.5, minReadiness: 85, website: "careers.google.com" }
-  });
-
-  const amazon = await prisma.company.create({
-    data: { name: "Amazon", industry: "Product", ctc: "44 LPA", minCgpa: 8.0, minReadiness: 80, website: "amazon.jobs" }
-  });
-
-  const infosys = await prisma.company.create({
-    data: { name: "Infosys", industry: "Service", ctc: "5.5 LPA", minCgpa: 6.0, minReadiness: 50, website: "infosys.com/careers" }
-  });
-
-  // Upcoming Drive
-  const nextWeek = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
-  await prisma.placementDrive.create({
-    data: {
-      title: "Google SDE Intern On-Campus",
-      description: "Hiring for Summer 2027 SDE Role",
-      date: nextWeek,
-      role: "Software Development Engineer",
-      type: "INTERNSHIP",
-      status: "ACTIVE",
-      salary: "1.2 LPM Stipend",
-      companyId: google.id,
-      students: { connect: [{ id: students[0].id }] } // Alice applied
-    }
-  });
-
-  // Past Info (Completed Drives)
-  const lastMonth = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
-  await prisma.placementDrive.create({
-    data: {
-      title: "Amazon SDE-1",
-      description: "Full-Time Hiring for Bangalore office.",
-      date: lastMonth,
+      title: "Google SDE Hiring 2024",
+      description: "Hiring for SDE-1 roles in Bangalore.",
+      date: new Date(Date.now() + 10 * 24 * 60 * 60 * 1000),
+      location: "Main Auditorium",
       role: "SDE-1",
-      type: "FULL_TIME",
-      status: "COMPLETED",
-      salary: "44 LPA",
-      companyId: amazon.id,
-      // Alice & Eve applied
-      students: { connect: [{ id: students[0].id }, { id: students[4].id }] } 
+      salary: "45 LPA",
+      companyId: google.id,
+      status: "ACTIVE"
     }
   });
 
-  // Upcoming non-active drive
-  await prisma.placementDrive.create({
-    data: {
-      title: "Infosys System Engineer",
-      description: "Mass hiring across branches.",
-      date: new Date(now.getTime() + 14 * 24 * 60 * 60 * 1000),
-      role: "System Engineer",
-      type: "FULL_TIME",
-      status: "UPCOMING",
-      salary: "5.5 LPA",
-      companyId: infosys.id,
-      students: { connect: [{ id: students[1].id }, { id: students[2].id }] }
-    }
-  });
-
-  // Add some notifications so the bell icon shows something
-  await prisma.notification.createMany({
-    data: [
-      { userId: students[0].id, title: "Mock Test Scheduled", message: "Final Placements Qualifier scheduled for 3 days from now.", type: "INFO" },
-      { userId: faculty.id, title: "Submissions Pending Review", message: "5 students have completed the Core CS Mid-Term Evaluation.", type: "WARNING" }
-    ]
-  });
-
-  console.log("✅ Database Reset and Seeding Completed Successfully.");
+  console.log("✅ ULTIMATE SEED V2 COMPLETE!");
 }
 
-main()
-  .catch((e) => {
-    console.error("❌ Seed Error:", e);
-    process.exit(1);
-  })
-  .finally(async () => {
-    await prisma.$disconnect();
-  });
+main().catch(console.error).finally(() => prisma.$disconnect());

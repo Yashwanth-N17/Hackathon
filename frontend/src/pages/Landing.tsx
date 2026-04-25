@@ -84,6 +84,18 @@ const roles = [
     border: "group-hover:border-success/40",
     accent: "from-success/20 to-success/5",
   },
+  {
+    id: "company",
+    title: "Recruiter / Company",
+    desc: "Register your college drive, review student analytics, and hire top talent.",
+    icon: Rocket,
+    href: "/auth/company/login",
+    tag: "Recruiter Portal",
+    color: "text-primary",
+    bg: "bg-primary/8 group-hover:bg-primary/14",
+    border: "group-hover:border-primary/40",
+    accent: "from-primary/20 to-primary/5",
+  },
 ];
 
 const NAV_LINKS = [
@@ -331,7 +343,7 @@ const Landing = () => {
             </motion.div>
 
             <motion.div
-              className="grid md:grid-cols-3 gap-6"
+              className="grid md:grid-cols-2 lg:grid-cols-4 gap-6"
               variants={staggerContainer}
               initial="initial"
               whileInView="animate"
