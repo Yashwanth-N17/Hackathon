@@ -68,8 +68,13 @@ const MockInterview = () => {
   const fetchStudents = async () => {
     try {
       const token = localStorage.getItem('accessToken');
-      const response = await axios.get(`${API_BASE}/faculty/students`, { headers: { Authorization: `Bearer ${token}` } });
-      setStudents(response.data.data || []);
+      const [studentsRes, meRes] = await Promise.all([
+        axios.get(`${API_BASE}/faculty/students`, { headers: { Authorization: `Bearer ${token}` } }),
+        axios.get(`${API_BASE}/faculty/me`, { headers: { Authorization: `Bearer ${token}` } })
+      ]);
+      const allStudents = studentsRes.data.data || [];
+      const menteeIds = meRes.data.data?.menteeIds || [];
+      setStudents(allStudents.filter((s: any) => menteeIds.includes(s.id)));
     } catch (error) { console.error("Failed to fetch students", error); }
   };
 
@@ -261,7 +266,9 @@ const MockInterview = () => {
               <div className="flex flex-col items-center justify-center py-20 border border-dashed border-border rounded-2xl text-muted-foreground">
                 <MessageSquare className="h-10 w-10 mb-3 opacity-30" />
                 <p className="font-medium">No scheduled sessions</p>
-                <p className="text-sm mt-1 opacity-60">Book a faculty session above to see it listed here.</p>
+                <p className="text-sm mt-1 opacity-60">
+                  {userRole === 'faculty' ? 'Start a session with a student from "My Students" tab.' : 'Book a faculty session above to see it listed here.'}
+                </p>
               </div>
             ) : interviews.filter(i => i.status !== 'COMPLETED' && i.type === 'FACULTY').map((interview) => (
               <div key={interview.id} className="glass-card rounded-2xl p-5 shadow-elevated flex items-center justify-between hover:scale-[1.01] transition-transform duration-200">
@@ -278,6 +285,11 @@ const MockInterview = () => {
                     </div>
                     <p className="text-xs text-muted-foreground flex items-center gap-3">
                       <span className="flex items-center gap-1"><Briefcase className="h-3 w-3" /> {interview.mode}</span>
+                      {userRole === 'faculty' && interview.student && (
+                        <span className="flex items-center gap-1"><User className="h-3 w-3" />
+                          {interview.student?.name || interview.student?.fullName || 'Student'}
+                        </span>
+                      )}
                       <span className="flex items-center gap-1"><Calendar className="h-3 w-3" />
                         {new Date(interview.scheduledAt || interview.createdAt).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })}
                       </span>
@@ -295,7 +307,9 @@ const MockInterview = () => {
           <TabsContent value="history" className="space-y-3">
             {interviews.filter(i => i.status === 'COMPLETED').length === 0 ? (
               <div className="p-20 text-center text-muted-foreground border border-dashed border-border rounded-2xl">
-                No completed interviews yet. Finish a session to see your analysis.
+                {userRole === 'faculty'
+                  ? 'No completed student interviews yet. Finish a session to see the student analysis.'
+                  : 'No completed interviews yet. Finish a session to see your analysis.'}
               </div>
             ) : interviews.filter(i => i.status === 'COMPLETED').map((interview) => (
               <div key={interview.id} className="glass-card rounded-2xl p-5 shadow-elevated flex items-center justify-between hover:scale-[1.01] transition-transform duration-200">
@@ -306,6 +320,12 @@ const MockInterview = () => {
                   <div>
                     <h3 className="font-semibold mb-1">{interview.title}</h3>
                     <div className="flex items-center gap-3 text-xs text-muted-foreground">
+                      {userRole === 'faculty' && interview.student && (
+                        <span className="flex items-center gap-1 font-medium text-foreground">
+                          <User className="h-3 w-3" />
+                          {interview.student?.name || interview.student?.fullName || 'Student'}
+                        </span>
+                      )}
                       <span className="flex items-center gap-1"><Calendar className="h-3 w-3" /> {new Date(interview.createdAt).toLocaleDateString()}</span>
                       <span className="flex items-center gap-1 text-green-600 bg-green-500/10 px-2 py-0.5 rounded-full">
                         <Trophy className="h-3 w-3" /> {Math.round(interview.overallScore)}%
@@ -315,7 +335,7 @@ const MockInterview = () => {
                 </div>
                 <Button variant="outline" className="rounded-xl border-primary/20 text-primary hover:bg-primary/5 font-medium"
                   onClick={() => navigate(`/${userRole}/interview/${interview.id}`)}>
-                  View Report <ArrowRight className="ml-2 h-4 w-4" />
+                  {userRole === 'faculty' ? 'View Student Analysis' : 'View Report'} <ArrowRight className="ml-2 h-4 w-4" />
                 </Button>
               </div>
             ))}

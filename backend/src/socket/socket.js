@@ -19,6 +19,7 @@ export function setupSocket(server) {
     socket.on("join_interview", (interviewId) => {
       socket.join(interviewId);
       console.log(`Socket ${socket.id} joined interview ${interviewId}`);
+      socket.to(interviewId).emit("user_joined");
     });
 
     socket.on("send_message", async (data) => {
@@ -29,6 +30,14 @@ export function setupSocket(server) {
 
     socket.on("send_live_transcript", ({ interviewId, text, senderId }) => {
       socket.to(interviewId).emit("receive_live_transcript", { text, senderId });
+    });
+
+    socket.on("webrtc_signal", (data) => {
+      socket.to(data.interviewId).emit("webrtc_signal", data);
+    });
+
+    socket.on("end_interview", ({ interviewId }) => {
+      socket.to(interviewId).emit("interview_ended");
     });
 
     socket.on("disconnect", () => {

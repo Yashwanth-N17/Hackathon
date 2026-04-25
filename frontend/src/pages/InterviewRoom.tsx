@@ -27,14 +27,25 @@ const InterviewRoom = () => {
   const [analyzing, setAnalyzing] = useState(false);
   const [socket, setSocket] = useState<any>(null);
   const [localStream, setLocalStream] = useState<MediaStream | null>(null);
+  const [remoteStream, setRemoteStream] = useState<MediaStream | null>(null);
   const [isMuted, setIsMuted] = useState(false);
   const [isVideoOff, setIsVideoOff] = useState(false);
   const [liveCaptions, setLiveCaptions] = useState({ me: "", partner: "" });
   const [sentiment, setSentiment] = useState({ label: "Neutral", score: 50, clarity: 80 });
   const [currentEmotion, setCurrentEmotion] = useState("neutral");
-
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [audioLevel, setAudioLevel] = useState(0);
+
+  const peerConnection = useRef<RTCPeerConnection | null>(null);
+  const remoteVideoRef = useRef<HTMLVideoElement | null>(null);
+
+  // Reactively keep remote video element in sync with the stream
+  useEffect(() => {
+    if (remoteVideoRef.current && remoteStream) {
+      remoteVideoRef.current.srcObject = remoteStream;
+      remoteVideoRef.current.play().catch(() => {});
+    }
+  }, [remoteStream]);
 
   const scrollAreaRef = useRef<HTMLDivElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -48,6 +59,7 @@ const InterviewRoom = () => {
   const isTypingRef = useRef(isTyping);
   const inputRef = useRef(input);
   const user = JSON.parse(localStorage.getItem('user') || '{}');
+  const isFaculty = (user.role?.toUpperCase() || '') === 'FACULTY';
   
   const behavioralDataRef = useRef({ happy: 0, neutral: 0, sad: 0, fearful: 0, angry: 0, surprised: 0, total: 0 });
   const faceApiIntervalRef = useRef<NodeJS.Timeout | null>(null);
@@ -71,34 +83,135 @@ const InterviewRoom = () => {
   useEffect(() => { inputRef.current = input; }, [input]);
 
   const mediaInitialized = useRef(false);
+
+  // Initialize WebRTC Peer Connection
+  const initPeerConnection = (s: any) => {
+    if (peerConnection.current) return;
+
+    const pc = new RTCPeerConnection({
+      iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
+    });
+
+    pc.onicecandidate = (event) => {
+      if (event.candidate) {
+        s.emit("webrtc_signal", { interviewId: id, signal: { type: 'candidate', candidate: event.candidate } });
+      }
+    };
+
+    pc.ontrack = (event) => {
+      console.log("Received remote track", event.streams[0]);
+      setRemoteStream(event.streams[0]);
+      if (remoteVideoRef.current) {
+        remoteVideoRef.current.srcObject = event.streams[0];
+      }
+    };
+
+    if (localStreamRef.current) {
+      localStreamRef.current.getTracks().forEach(track => {
+        pc.addTrack(track, localStreamRef.current!);
+      });
+    }
+
+    peerConnection.current = pc;
+    return pc;
+  };
+
   useEffect(() => {
     if (mediaInitialized.current) return;
     mediaInitialized.current = true;
 
-    fetchInterview();
-    startMedia();
-    const newSocket = io(SOCKET_URL);
-    socketRef.current = newSocket;
-    setSocket(newSocket);
-    newSocket.emit("join_interview", id);
-    newSocket.on("receive_message", (message: any) => {
-      setMessages(prev => [...prev, message]);
-      setIsTyping(false);
-      if (message.senderRole === 'AI' || message.senderRole === 'FACULTY') speakText(message.text);
-    });
-    newSocket.on("receive_live_transcript", ({ text, senderId }: any) => {
-      if (senderId !== user.id) {
+    const setupRoom = async () => {
+      await fetchInterview();
+      await startMedia(); // VERY IMPORTANT: Wait for camera before WebRTC
+
+      const newSocket = io(SOCKET_URL);
+      socketRef.current = newSocket;
+      setSocket(newSocket);
+      
+      newSocket.emit("join_interview", id);
+
+      newSocket.on("receive_message", (message: any) => {
+        console.log("New message received", message);
+        setMessages(prev => {
+          if (prev.find(m => m.id === message.id)) return prev;
+          return [...prev, message];
+        });
+        setIsTyping(false);
+        if (message.senderRole === 'AI' || message.senderRole === 'FACULTY') speakText(message.text);
+      });
+
+      newSocket.on("webrtc_signal", async (data: any) => {
+        const pc = peerConnection.current || initPeerConnection(newSocket);
+        if (!pc) return;
+
+        try {
+          if (data.signal.type === 'offer') {
+            await pc.setRemoteDescription(new RTCSessionDescription(data.signal.offer));
+            const answer = await pc.createAnswer();
+            await pc.setLocalDescription(answer);
+            newSocket.emit("webrtc_signal", { interviewId: id, signal: { type: 'answer', answer } });
+          } else if (data.signal.type === 'answer') {
+            await pc.setRemoteDescription(new RTCSessionDescription(data.signal.answer));
+          } else if (data.signal.type === 'candidate') {
+            if (pc.remoteDescription) {
+              await pc.addIceCandidate(new RTCIceCandidate(data.signal.candidate));
+            }
+          }
+        } catch (err) {
+          console.error("WebRTC Error:", err);
+        }
+      });
+
+      newSocket.on("user_joined", async () => {
+        console.log("Partner joined! Sending offer...");
+        const pc = peerConnection.current || initPeerConnection(newSocket);
+        if (pc) {
+          try {
+            const offer = await pc.createOffer();
+            await pc.setLocalDescription(offer);
+            newSocket.emit("webrtc_signal", { interviewId: id, signal: { type: 'offer', offer } });
+          } catch (err) {
+            console.error("Offer error:", err);
+          }
+        }
+      });
+
+      newSocket.on("interview_ended", () => {
+        toast({ title: "Interview Ended", description: "The session was closed by the other user." });
+        fetchInterview();
+      });
+
+      newSocket.on("receive_live_transcript", ({ text, senderId }: { text: string; senderId: string }) => {
         setLiveCaptions(prev => ({ ...prev, partner: text }));
-        setTimeout(() => setLiveCaptions(prev => prev.partner === text ? { ...prev, partner: "" } : prev), 3000);
+        setTimeout(() => {
+          setLiveCaptions(prev => ({ ...prev, partner: '' }));
+        }, 3000);
+      });
+
+      // Fallback
+      if (!isFaculty) {
+          setTimeout(async () => {
+              if (peerConnection.current && peerConnection.current.connectionState !== 'connected') {
+                  const pc = peerConnection.current;
+                  try {
+                      const offer = await pc.createOffer();
+                      await pc.setLocalDescription(offer);
+                      newSocket.emit("webrtc_signal", { interviewId: id, signal: { type: 'offer', offer } });
+                  } catch(e){}
+              }
+          }, 4000);
       }
-    });
-    newSocket.on("interview_ended", () => { fetchInterview(); toast({ title: "Interview Ended" }); });
+    };
+    
+    setupRoom();
+
     return () => {
-      newSocket.disconnect();
+      socketRef.current?.disconnect();
       localStreamRef.current?.getTracks().forEach(t => t.stop());
       if (recognitionRef.current) recognitionRef.current.stop();
       if (animationFrameRef.current) cancelAnimationFrame(animationFrameRef.current);
       if (audioContextRef.current) audioContextRef.current.close();
+      if (peerConnection.current) peerConnection.current.close();
     };
   }, [id]);
 
@@ -172,26 +285,31 @@ const InterviewRoom = () => {
       const text = interim || final;
       setLiveCaptions(prev => ({ ...prev, me: text }));
       if (text) {
-        const positiveWords = ['great', 'good', 'confident', 'achieved', 'solved', 'efficient', 'happy', 'excellent'];
-        const negativeWords = ['difficult', 'hard', 'failed', 'unsure', 'problem', 'stuck', 'confused'];
-        let score = 50;
-        text.toLowerCase().split(' ').forEach(w => {
-          if (positiveWords.includes(w)) score += 8;
-          if (negativeWords.includes(w)) score -= 8;
-        });
-        score = Math.max(0, Math.min(100, score));
-        setSentiment({ label: score > 70 ? 'Positive' : score < 40 ? 'Concerned' : 'Neutral', score, clarity: 75 + Math.random() * 20 });
+        // For faculty, NLP tracks student (partner) speech — updated via separate effect
+        // For student/AI, track own speech
+        if (!isFaculty) {
+          const positiveWords = ['great', 'good', 'confident', 'achieved', 'solved', 'efficient', 'happy', 'excellent'];
+          const negativeWords = ['difficult', 'hard', 'failed', 'unsure', 'problem', 'stuck', 'confused'];
+          let score = 50;
+          text.toLowerCase().split(' ').forEach(w => {
+            if (positiveWords.includes(w)) score += 8;
+            if (negativeWords.includes(w)) score -= 8;
+          });
+          score = Math.max(0, Math.min(100, score));
+          setSentiment({ label: score > 70 ? 'Positive' : score < 40 ? 'Concerned' : 'Neutral', score, clarity: 75 + Math.random() * 20 });
+        }
       }
       if (interview.type === 'FACULTY' && socketRef.current) {
         socketRef.current.emit("send_live_transcript", { interviewId: id, text, senderId: user.id });
       }
-      if (interview.type === 'AI') {
+      if (interview.type === 'AI' || interview.type === 'FACULTY') {
         setInput(text);
         if (autoSendTimeoutRef.current) clearTimeout(autoSendTimeoutRef.current);
         if (text.trim() && final) {
+          // Auto-send for both AI and Faculty after a 1-second delay
           autoSendTimeoutRef.current = setTimeout(() => {
             if (sendMessageRef.current) sendMessageRef.current(text);
-          }, 1500);
+          }, 1000);
         }
       }
       if (final) {
@@ -219,6 +337,21 @@ const InterviewRoom = () => {
       try { rec.stop(); } catch (e) {} 
     };
   }, [interview?.id, localStream]);
+
+  // ── Faculty-only: update NLP from student's (partner) live captions ──────────
+  useEffect(() => {
+    if (!isFaculty || !liveCaptions.partner) return;
+    const text = liveCaptions.partner;
+    const positiveWords = ['great', 'good', 'confident', 'achieved', 'solved', 'efficient', 'happy', 'excellent'];
+    const negativeWords = ['difficult', 'hard', 'failed', 'unsure', 'problem', 'stuck', 'confused'];
+    let score = 50;
+    text.toLowerCase().split(' ').forEach(w => {
+      if (positiveWords.includes(w)) score += 8;
+      if (negativeWords.includes(w)) score -= 8;
+    });
+    score = Math.max(0, Math.min(100, score));
+    setSentiment({ label: score > 70 ? 'Positive' : score < 40 ? 'Concerned' : 'Neutral', score, clarity: 75 + Math.random() * 20 });
+  }, [liveCaptions.partner, isFaculty]);
 
 
   const startMedia = async () => {
@@ -339,9 +472,15 @@ const InterviewRoom = () => {
 
       await axios.post(`${API_BASE}/interviews/${id}/finish`, { behavioralData }, { headers: { Authorization: `Bearer ${token}` } });
       
-      toast({ 
-        title: "Interview Completed! 🚀", 
-        description: "Your session has been analyzed. View your results below." 
+      if (socketRef.current) {
+        socketRef.current.emit("end_interview", { interviewId: id });
+      }
+
+      toast({
+        title: isFaculty ? 'Session Complete! 🎓' : 'Interview Completed! 🚀',
+        description: isFaculty
+          ? "Student's interview has been analyzed. View the NLP report below."
+          : 'Your session has been analyzed. View your results below.'
       });
       
       // Refresh to show the COMPLETED view
@@ -375,11 +514,22 @@ const InterviewRoom = () => {
           {/* Page Header */}
           <div className="flex items-start justify-between">
             <div>
-              <p className="text-xs uppercase tracking-widest text-primary font-medium mb-1">Session Complete</p>
+              <p className="text-xs uppercase tracking-widest text-primary font-medium mb-1">
+                {isFaculty ? 'Student Analysis Report' : 'Session Complete'}
+              </p>
               <h1 className="text-3xl font-display font-bold tracking-tight">{interview.title}</h1>
-              <p className="text-muted-foreground mt-1 text-sm">Placement Readiness Intelligence Report · {new Date(interview.createdAt).toLocaleDateString()}</p>
+              {isFaculty && interview.student && (
+                <p className="text-sm font-medium text-primary mt-1 flex items-center gap-1.5">
+                  <User className="h-4 w-4" />
+                  {interview.student?.name || interview.student?.fullName || 'Student'}
+                </p>
+              )}
+              <p className="text-muted-foreground mt-1 text-sm">
+                {isFaculty ? 'NLP Intelligence Report · ' : 'Placement Readiness Intelligence Report · '}
+                {new Date(interview.createdAt).toLocaleDateString()}
+              </p>
             </div>
-            <Button variant="outline" className="rounded-xl border-primary/20 text-primary hover:bg-primary/5" onClick={() => navigate('/student/interview')}>
+            <Button variant="outline" className="rounded-xl border-primary/20 text-primary hover:bg-primary/5" onClick={() => navigate(isFaculty ? '/faculty/interview' : '/student/interview')}>
               <ArrowLeft className="mr-2 h-4 w-4" /> Back
             </Button>
           </div>
@@ -608,11 +758,48 @@ const InterviewRoom = () => {
                 )}
                 <div className="absolute bottom-2 left-2">
                   <span className="bg-background/70 backdrop-blur-sm text-xs px-2 py-0.5 rounded-full text-muted-foreground border border-border">
-                    {user.name || 'You'}
+                    {user.name || (isFaculty ? 'You (Faculty)' : 'You')}
                   </span>
                 </div>
               </div>
             </div>
+
+            {/* ─── Remote Feed ─── */}
+            {(isFaculty || interview?.type === 'FACULTY') && (
+              <div className="glass-card rounded-2xl shadow-elevated overflow-hidden flex-shrink-0">
+                <div className="relative w-full aspect-video bg-muted flex flex-col items-center justify-center text-muted-foreground">
+                  <video
+                    ref={remoteVideoRef}
+                    autoPlay
+                    playsInline
+                    className="absolute inset-0 w-full h-full object-cover"
+                    style={{ display: remoteStream ? 'block' : 'none' }}
+                  />
+                  {!remoteStream && (
+                    <div className="flex flex-col items-center gap-2">
+                      <div className="h-10 w-10 rounded-full bg-primary/10 flex items-center justify-center">
+                        <User className="h-5 w-5 text-primary" />
+                      </div>
+                      <span className="text-xs text-muted-foreground">
+                        Waiting for {isFaculty ? 'Student' : 'Faculty'}...
+                      </span>
+                    </div>
+                  )}
+                  <div className="absolute top-2 right-2 z-10">
+                    <span className="flex items-center gap-1 bg-green-500/10 border border-green-500/20 text-green-400 text-[9px] px-1.5 py-0.5 rounded-full">
+                      <span className="h-1.5 w-1.5 rounded-full bg-green-500 animate-pulse" /> LIVE
+                    </span>
+                  </div>
+                  <div className="absolute bottom-2 left-2 z-10">
+                    <span className="bg-background/70 backdrop-blur-sm text-xs px-2 py-0.5 rounded-full text-muted-foreground border border-border">
+                      {isFaculty 
+                        ? (interview?.student?.name || interview?.student?.fullName || 'Student')
+                        : (interview?.faculty?.name || interview?.faculty?.fullName || 'Faculty')}
+                    </span>
+                  </div>
+                </div>
+              </div>
+            )}
 
             {/* ─── FIX: Icon-only mic / video controls ─── */}
             <div className="glass-card rounded-2xl shadow-elevated px-5 py-4 flex-shrink-0">
@@ -649,10 +836,16 @@ const InterviewRoom = () => {
               {/* Header */}
               <div className="flex items-center justify-between">
                 <h3 className="text-xs uppercase tracking-widest font-medium text-muted-foreground flex items-center gap-2">
-                  <Sparkles className="h-3.5 w-3.5 text-primary" /> NLP Intelligence
+                  <Sparkles className="h-3.5 w-3.5 text-primary" />
+                  {isFaculty ? 'Student NLP Intelligence' : 'NLP Intelligence'}
                 </h3>
                 <Badge className="bg-primary/10 text-primary border-primary/20 text-[9px] rounded-full px-2 animate-pulse">LIVE</Badge>
               </div>
+              {isFaculty && (
+                <p className="text-[10px] text-muted-foreground italic -mt-2">
+                  Tracking student speech &amp; sentiment in real-time
+                </p>
+              )}
 
               {/* Performance */}
               <div className="space-y-2">
@@ -701,7 +894,7 @@ const InterviewRoom = () => {
               {/* Live status */}
               <div className="flex items-center gap-2 text-xs text-muted-foreground">
                 <div className="h-2 w-2 rounded-full bg-primary animate-ping" />
-                Monitoring transcript...
+                {isFaculty ? 'Monitoring student transcript...' : 'Monitoring transcript...'}
               </div>
             </div>
 
